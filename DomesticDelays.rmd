@@ -1,0 +1,244 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+```{r}
+library(tidyverse)
+data_file <- read_csv("DomesticAirlines.csv")
+
+data_Bris_jetstar <- filter(data_file, Departing_Port=="Brisbane")
+data_Bris_jetstar <- filter(data_Bris_jetstar, (Airline=="Jetstar"))
+data_Bris_jetstar$Year <- as.factor(data_Bris_jetstar$Year)
+
+summary_jetstar <- summarise(
+  group_by(data_Bris_jetstar, Year),
+  Cancellations = sum(Cancellations),
+  Departures_On_Time = sum(Departures_On_Time),
+  Departures_Delayed = sum(Departures_Delayed)
+)
+
+summary_jetstar
+```
+
+
+```{r}
+write.csv(summary_jetstar, "jetstar.csv", row.names = FALSE)
+
+data_Bris_jetstar <- summarise(
+  group_by(data_Bris_jetstar, Year, Month_Num),
+  Cancellations = sum(Cancellations),
+  Departures_On_Time = sum(Departures_On_Time),
+  Departures_Delayed = sum(Departures_Delayed)
+)
+```
+
+```{r}
+## cancel and delay ####
+data_Bris_jetstar <- mutate(data_Bris_jetstar, CancelDelayPercentage = 
+                        (Cancellations+Departures_Delayed)/(Cancellations+Departures_On_Time +Departures_Delayed))
+
+ggplot(data=data_Bris_jetstar,
+     aes(y=CancelDelayPercentage, x = Year)) +
+geom_boxplot()+
+theme_bw()+
+labs(y ="Percentage of cancellations + delays")+
+ggtitle("Percentage of cancellations and delays of flights per year for Jetstar only")
+```
+
+```{r}
+## creating discrete variables ####
+discreteThreshold <- c(0.1, 0.2)
+
+data_Bris_jetstar <-data_Bris_jetstar %>%
+  mutate(efficience = if_else(CancelDelayPercentage <discreteThreshold[1], 1, 
+                              if_else(CancelDelayPercentage <discreteThreshold[2], 2,3)))
+
+cat_names <- c("Good (less. 10 %)", "Medium (10 - 20 %)", "Poor (over 20 %)")
+data_Bris_jetstar$Performance <- cat_names[data_Bris_jetstar$efficience]
+
+ggplot(data_Bris_jetstar, aes(x=Year))+
+  geom_bar(aes(fill=Performance)) +
+  theme_bw()+
+  scale_fill_manual(values=c("green",
+                             "yellow",
+                             "red"))+
+  labs(y="Number of months")+
+  ggtitle("Performance of the Jetstar company per year (2004-2021)")
+```
+
+```{r}
+## markov ####
+library(markovchain)
+sequence_markov <- data_Bris_jetstar$efficience
+createSequenceMatrix(sequence_markov)
+
+fit_markov <- markovchainFit(sequence_markov,
+                             confidencelevel = 0.9,
+                             method="mle")
+fit_markov
+
+## markov without 2020-2021 ####
+data_Bris_jetstar$Year_num <-  as.numeric(as.character(data_Bris_jetstar$Year)) 
+data_Bris_jetstar_2004_2019 <- filter(data_Bris_jetstar, Year_num <= 2019)
+sequence_markov_2004_2019 <- data_Bris_jetstar_2004_2019$efficience
+createSequenceMatrix(sequence_markov_2004_2019)
+
+fit_markov_2004_2019 <- markovchainFit(sequence_markov_2004_2019,
+                                       confidencelevel = 0.9,
+                                       method="mle")
+fit_markov_2004_2019
+```
+
+```{r}
+## markov 2020 2021 ####
+data_Bris_jetstar_2020_2021 <- filter(data_Bris_jetstar, Year_num >= 2020)
+sequence_markov_2020_2021 <- data_Bris_jetstar_2020_2021$efficience
+createSequenceMatrix(sequence_markov_2020_2021)
+
+fit_markov_2020_2021 <- markovchainFit(sequence_markov_2020_2021,
+                                       confidencelevel = 0.9,
+                                       method="mle")
+fit_markov_2020_2021
+
+```
+
+```{r}
+## Diagram ####
+mat <- matrix(0, nrow=length(cat_names), ncol = length(cat_names))
+for (i in seq(length(cat_names))){
+  for (j in seq(length(cat_names))){
+    mat[j,i] <- fit_markov$estimate[i,j]
+  }
+}
+mat
+
+short_names <- c("Good", "Medium", "Poor")
+row.names(mat)<-short_names
+colnames(mat)<-short_names
+mat <- round(mat, 3)
+```
+
+```{r}
+library(diagram)
+plotmat(mat, 
+        lwd = 1,
+        box.lwd = 2,
+        cex.txt = 0.8,
+        box.size = 0.09,
+        box.type = "circle",
+        box.prop = 0.5,
+        box.col = "pink",
+        arr.length = 0.3,
+        arr.width = 0.2,
+        self.cex = 0.4,
+        self.shiftx = -.09,
+        main = "Markov Chain Transition Matrix \
+        representing the performance of Jetstar (2004-2021)")
+```
+
+```{r}
+## Diagram ####
+mat_2004_2019 <- matrix(0, nrow=length(cat_names), ncol = length(cat_names))
+for (i in seq(length(cat_names))){
+  for (j in seq(length(cat_names))){
+    mat_2004_2019[j,i] <- fit_markov_2004_2019$estimate[i,j]
+  }
+}
+mat_2004_2019
+
+short_names <- c("Good", "Medium", "Poor")
+row.names(mat_2004_2019)<-short_names
+colnames(mat_2004_2019)<-short_names
+mat_2004_2019 <- round(mat_2004_2019, 3)
+```
+
+```{r}
+library(diagram)
+plotmat(mat_2004_2019, 
+        lwd = 1,
+        box.lwd = 2,
+        cex.txt = 0.8,
+        box.size = 0.09,
+        box.type = "circle",
+        box.prop = 0.5,
+        box.col = "pink",
+        arr.length = 0.3,
+        arr.width = 0.2,
+        self.cex = 0.4,
+        self.shiftx = -.09,
+        main = "Markov Chain Transition Matrix \
+        representing the performance of Jetstar (2004-2019)")
+```
+
+```{r}
+## Diagram ####
+mat_2020_2021 <- matrix(0, nrow=2, ncol = 2)
+for (i in seq(2)){
+  for (j in seq(2)){
+    mat_2020_2021[j,i] <- fit_markov_2020_2021$estimate[i,j]
+  }
+}
+mat_2020_2021
+
+short_names <- c("Medium", "Poor")
+row.names(mat_2020_2021)<-short_names
+colnames(mat_2020_2021)<-short_names
+mat_2020_2021 <- round(mat_2020_2021, 3)
+```
+
+```{r}
+library(diagram)
+plotmat(mat_2020_2021, 
+        lwd = 1,
+        box.lwd = 2,
+        cex.txt = 0.8,
+        box.size = 0.09,
+        box.type = "circle",
+        box.prop = 0.5,
+        box.col = "pink",
+        arr.length = 0.3,
+        arr.width = 0.2,
+        self.cex = 0.4,
+        self.shiftx = -.12,
+        self.shifty = 0.01,
+        main = "Markov Chain Transition Matrix \
+        representing the performance of Jetstar (2020-2021)")
+
+```
+
+```{r}
+## predictions ####
+initial_state <- matrix(c(1,0,0), ncol = 1)
+
+matrix_results <- matrix(0, ncol = 3, nrow=12)
+
+for (j in seq(nrow(matrix_results))){
+  initial_state <- unname(mat %*% initial_state)
+  matrix_results[j, ] <- initial_state
+}
+
+colnames(matrix_results) <- c("Good", "Medium", "Poor")
+row.names(matrix_results) <- paste("Forecast month", seq(12))
+
+write.csv(matrix_results, "jetstar forecast.csv")
+```
+
+```{r}
+## predictions ####
+initial_state <- matrix(c(1,0,0), ncol = 1)
+
+matrix_results <- matrix(0, ncol = 3, nrow=12)
+
+for (j in seq(nrow(matrix_results))){
+  initial_state <- unname(mat_2004_2019 %*% initial_state)
+  matrix_results[j, ] <- initial_state
+}
+
+colnames(matrix_results) <- c("Good", "Medium", "Poor")
+row.names(matrix_results) <- paste("Forecast month", seq(12))
+```
+
+```{r}
+write.csv(matrix_results, "jetstar forecast 2004 2019.csv")
+```
